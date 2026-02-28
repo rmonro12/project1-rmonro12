@@ -3,16 +3,19 @@ from xml.parsers.expat import model
 import tensorflow as tf
 import keras
 from keras import Input, layers, Sequential
+from sklearn.model_selection import train_test_split
 
 # Helper libraries
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import image
+import pathlib
 
 L2_RATE = 1e-4 # L2 regularization rate
 DO_RATE = 0.20 # Dropout rate
 
+# Create model architecture
 def build_model():
   model = tf.keras.Sequential ([
     Input(shape=(176, 144, 3)),
@@ -33,35 +36,48 @@ def build_model():
     layers.BatchNormalization(),
     layers.Flatten(),
     layers.Dense(512, activation='relu'),
-    layers.Dense(2, activation='softmax')
+    layers.Dense(1, activation='sigmoid')
   ])
   return model
 
-(train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.cifar10.load_data()
-class_names = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+# Define dataset parameters
+IMG_SIZE = (176, 144)
+data_dir = pathlib.Path("dataset")
+images = []
+labels = []
 
-val_frac = 0.1
-num_val_samples = int(len(train_images)*val_frac)
-val_idxs = np.random.choice(np.arange(len(train_images)), size=num_val_samples, replace=False)
-trn_idxs = np.setdiff1d(np.arange(len(train_images)), val_idxs)
-val_images = train_images[val_idxs, :,:,:]
-train_images = train_images[trn_idxs, :,:,:]
-val_labels = train_labels[val_idxs]
-train_labels = train_labels[trn_idxs]
-train_labels = train_labels.squeeze()
-test_labels = test_labels.squeeze()
-val_labels = val_labels.squeeze()
-input_shape  = train_images.shape[1:]
-train_images = train_images / 255.0
-test_images  = test_images  / 255.0
-val_images   = val_images   / 255.0
+for class_name in ["not_a_shoe", "shoe"]:
+    class_dir = data_dir / class_name
+    label = 0 if class_name == "not_a_shoe" else 1
+    
+    for img_path in class_dir.glob("*"):
+        img = tf.keras.utils.load_img(img_path, target_size=IMG_SIZE)
+        img = tf.keras.utils.img_to_array(img)
+        images.append(img)
+        labels.append(label)
 
+X = np.array(images) / 255.0   # Normalize
+y = np.array(labels)
+
+# Split into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2, # 80/20 train/test
+    stratify=y,
+    random_state=42
+)
+
+# Save for use in eval.py
+np.savez("saved_datasets/data_split.npz", X_test=X_test, y_test=y_test)
+
+# Build and compile model
 model = build_model()
 model.compile(optimizer='adam',
-    loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+    loss='binary_crossentropy',
     metrics=['accuracy'])
 
-train_hist = model.fit(train_images, train_labels,
-    validation_data=(val_images, val_labels),
-    epochs=30)
+# Start training
+train_hist = model.fit(X_train, y_train, epochs=2) # Control # of epochs for training here
+
+# Save model weights
 model.save('saved_models/project1_model.h5')
